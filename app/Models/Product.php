@@ -171,6 +171,35 @@ final class Product extends Model implements ExtendsContent
     }
 
     /**
+     * Serialize the merged content at the root, so a client reads `title` or a dynamic field from the
+     * product as {@see self::getAttribute()} does, without knowing they live on a separate record. Only
+     * keys the product does not own are added, so `id`, `created_at` and the relations stay the product's,
+     * and the content serializes through its own rules (hidden keys, translation, expanded dynamic fields).
+     * The nested `content` stays for readers that already use it. An unloaded content adds nothing and
+     * never triggers a lazy load.
+     *
+     * @return array<string, mixed>
+     */
+    #[Override]
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        $content = $this->mergedContent();
+
+        if (! $content instanceof Content) {
+            return $array;
+        }
+
+        foreach ($content->toArray() as $key => $value) {
+            if (! array_key_exists($key, $array) && ! $this->isNativeKey((string) $key)) {
+                $array[$key] = $value;
+            }
+        }
+
+        return $array;
+    }
+
+    /**
      * Write a content-owned attribute through to the merged content (E2a).
      *
      * @param  string  $key
