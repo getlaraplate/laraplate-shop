@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Modules\Core\Models\Role;
 use Modules\Shop\Models\Product;
+use Modules\Shop\Models\ProductVariant;
 
 beforeEach(function (): void {
     app()->setLocale('en');
@@ -88,4 +89,22 @@ it('carries the overlay in the CRUD list and detail answers, in the locale of th
     $italian = $this->postJson(route('core.crud.list', ['module' => 'shop', 'entity' => 'products']), ['pagination' => 10, 'page' => 1]);
 
     expect($italian->json('data.0.title'))->toBe('Lampada lunare');
+});
+
+it('carries the overlay on the product relation of a variant', function (): void {
+    $product = product_with_title('Moon lamp');
+    ProductVariant::factory()->create(['product_id' => $product->id]);
+
+    $role = Role::factory()->create(['name' => config('permission.roles.superadmin'), 'guard_name' => 'web']);
+    $user = User::factory()->create();
+    $user->assignRole($role);
+    $this->actingAs($user);
+
+    $response = $this->postJson(route('core.crud.list', ['module' => 'shop', 'entity' => 'product_variants']), [
+        'pagination' => 10,
+        'page' => 1,
+        'relations' => ['product'],
+    ]);
+
+    expect($response->json('data.0.product.title'))->toBe('Moon lamp');
 });
