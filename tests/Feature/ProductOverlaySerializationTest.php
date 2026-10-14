@@ -5,8 +5,10 @@ declare(strict_types=1);
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Modules\Core\Models\Role;
+use Modules\ERP\Models\Item;
 use Modules\Shop\Models\Product;
 use Modules\Shop\Models\ProductVariant;
+use Modules\Shop\Models\VariantItem;
 
 beforeEach(function (): void {
     app()->setLocale('en');
@@ -107,4 +109,24 @@ it('carries the overlay on the product relation of a variant', function (): void
     ]);
 
     expect($response->json('data.0.product.title'))->toBe('Moon lamp');
+});
+
+it('labels the composition rows of a variant with their ERP item', function (): void {
+    $product = product_with_title('Moon lamp');
+    $variant = ProductVariant::factory()->create(['product_id' => $product->id]);
+    $item = Item::factory()->create(['name' => 'Bulb', 'sku' => 'BLB-1']);
+    VariantItem::factory()->main()->for($variant, 'variant')->for($item, 'item')->create();
+
+    $role = Role::factory()->create(['name' => config('permission.roles.superadmin'), 'guard_name' => 'web']);
+    $user = User::factory()->create();
+    $user->assignRole($role);
+    $this->actingAs($user);
+
+    $response = $this->getJson(route('core.crud.detail', ['module' => 'shop', 'entity' => 'product_variants'])
+        . '?id=' . $variant->id . '&relations[]=product&relations[]=items.item');
+
+    $response->assertOk();
+    expect($response->json('data.product.title'))->toBe('Moon lamp')
+        ->and($response->json('data.items.0.item.name'))->toBe('Bulb')
+        ->and($response->json('data.items.0.item.sku'))->toBe('BLB-1');
 });
