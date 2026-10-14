@@ -55,3 +55,26 @@ it('filters variants by the title of their product', function (): void {
 
     expect(listed_ids('product_variants', ['property' => 'product.content.title', 'operator' => 'like', 'value' => '%Moon%']))->toBe([$variant->id]);
 });
+
+it('filters products by the plain title of the merged content', function (): void {
+    $moon = product_titled('Moon lamp');
+    product_titled('Sea chair');
+
+    expect(listed_ids('products', ['property' => 'title', 'operator' => 'like', 'value' => '%Moon%']))->toBe([$moon->id])
+        ->and(listed_ids('products', ['property' => 'slug', 'operator' => 'eq', 'value' => 'moon-lamp']))->toBe([$moon->id]);
+});
+
+it('keeps an owned column of the product a column', function (): void {
+    $featured = Product::factory()->create(['featured' => true]);
+    Product::factory()->create(['featured' => false]);
+
+    expect(listed_ids('products', ['property' => 'featured', 'operator' => 'eq', 'value' => true]))->toBe([$featured->id]);
+});
+
+it('filters variants by the plain title of their product', function (): void {
+    $moon = product_titled('Moon lamp');
+    $variant = ProductVariant::factory()->create(['product_id' => $moon->id]);
+    ProductVariant::factory()->create(['product_id' => product_titled('Sea chair')->id]);
+
+    expect(listed_ids('product_variants', ['property' => 'product.title', 'operator' => 'like', 'value' => '%Moon%']))->toBe([$variant->id]);
+});

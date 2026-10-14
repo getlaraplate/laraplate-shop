@@ -11,6 +11,7 @@ use Modules\CMS\Contracts\ExtendsContent;
 use Modules\CMS\Enums\CMSTables;
 use Modules\CMS\Models\Concerns\ExtendsContentTrait;
 use Modules\CMS\Models\Content;
+use Modules\Core\Contracts\IMountsRelatedAttributes;
 use Modules\Core\Overrides\Model;
 use Modules\Core\Search\Schema\FieldType;
 use Modules\ERP\Concerns\BelongsToCompany;
@@ -35,7 +36,7 @@ use Override;
  * @property bool $is_published_in_shop
  * @property bool $featured
  */
-final class Product extends Model implements ExtendsContent
+final class Product extends Model implements ExtendsContent, IMountsRelatedAttributes
 {
     use BelongsToCompany;
     use ExtendsContentTrait;
@@ -168,6 +169,21 @@ final class Product extends Model implements ExtendsContent
         }
 
         return parent::getAttribute($key);
+    }
+
+    #[Override]
+    public function mountedRelation(): string
+    {
+        return 'content';
+    }
+
+    /**
+     * Whether `$key` is read from the merged content: the product does not own it (E2a).
+     */
+    #[Override]
+    public function isMountedAttribute(string $key): bool
+    {
+        return ! $this->isNativeKey($key);
     }
 
     /**
