@@ -3,7 +3,7 @@
     "laraplate_owned": true,
     "alias": "shop",
     "description": "Shop module — online sales channel orchestrating CMS content, ERP items and SAO support.",
-    "color": "magenta",
+    "color": "bright-magenta",
     "keywords": [
         "shop",
         "ecommerce",
