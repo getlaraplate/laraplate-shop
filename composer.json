@@ -1,7 +1,7 @@
 {
   "name": "getlaraplate/laraplate-shop",
   "vendor": "getlaraplate",
-  "description": "Shop Module contains all the necessary functionalities for build up a new Ecommerce system.",
+  "description": "Laraplate Shop module: an online sales channel built on CMS content, ERP items and SAO support.",
   "version": "v0.1.0",
   "keywords": [
     "laravel",
