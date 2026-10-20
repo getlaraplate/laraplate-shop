@@ -2,7 +2,7 @@
     "name": "Shop",
     "laraplate_owned": true,
     "alias": "shop",
-    "description": "Shop module — online sales channel orchestrating CMS content, ERP items and SAO support.",
+    "description": "Laraplate Shop module: an online sales channel built on CMS content, ERP items and SAO support.",
     "color": "bright-magenta",
     "keywords": [
         "shop",
