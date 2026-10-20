@@ -31,11 +31,21 @@ final class UpdateProductAction
      */
     public function handle(Product $product, array $data): Product
     {
-        return $product->getConnection()->transaction(function () use ($product, $data): Product {
-            $fields = Arr::only($data['content'] ?? [], CreateProductAction::CONTENT_FIELDS);
+        $fields = Arr::only($data['content'] ?? [], CreateProductAction::CONTENT_FIELDS);
+
+        // Only an explicitly blank title is refused: an absent one leaves the title as it is.
+        if (array_key_exists('title', $fields) && (! is_string($fields['title']) || mb_trim($fields['title']) === '')) {
+            throw ValidationException::withMessages([
+                'content.title' => ['A product needs a title.'],
+            ]);
+        }
+
+        return $product->getConnection()->transaction(function () use ($product, $data, $fields): Product {
+            // The merge never lazy-loads the content: without it a content key would fall through to a product column.
+            $product->loadMissing('content');
 
             // A first translation in this locale needs a slug, and the title is all there is to derive it from.
-            if (isset($fields['title']) && is_string($fields['title']) && ! array_key_exists('slug', $fields) && $product->content?->hasTranslation() === false) {
+            if (isset($fields['title']) && ! array_key_exists('slug', $fields) && $product->content?->hasTranslation() === false) {
                 $fields['slug'] = Str::slug($fields['title']);
             }
 

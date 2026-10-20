@@ -31,11 +31,12 @@ final class CreateProductAction
     public const array COLUMNS = ['kind', 'is_published_in_shop', 'featured', 'release_date', 'metadata'];
 
     /**
-     * The content-owned fields a payload may carry.
+     * The content-owned fields a payload may carry. This is the content-write contract of the product
+     * actions, reused by the Filament form: any other content key is dropped.
      *
      * @var list<string>
      */
-    public const array CONTENT_FIELDS = ['title', 'slug', 'components', 'valid_from', 'valid_to'];
+    public const array CONTENT_FIELDS = ['title', 'slug', 'components', 'valid_from', 'valid_to', 'order_column'];
 
     public function __construct(private readonly SyncProductVariantsAction $variants) {}
 

@@ -216,3 +216,97 @@ it('refuses to update a variant that belongs to another product', function (): v
 
     expect($other->variants()->count())->toBe(1);
 });
+
+it('an update without the variants key leaves variants untouched', function (): void {
+    $product = resolve(CreateProductAction::class)->handle(product_write_payload());
+    $variant = $product->variants()->firstOrFail();
+    $row_ids = $variant->items()->pluck('id')->all();
+
+    resolve(UpdateProductAction::class)->handle(Product::query()->findOrFail($product->getKey()), [
+        'featured' => true,
+    ]);
+
+    expect(Product::query()->findOrFail($product->getKey())->featured)->toBeTrue()
+        ->and($product->variants()->pluck('id')->all())->toBe([$variant->getKey()])
+        ->and($variant->items()->pluck('id')->all())->toBe($row_ids);
+});
+
+it('a variant entry without the items key leaves its composition untouched', function (): void {
+    $product = resolve(CreateProductAction::class)->handle(product_write_payload());
+    $variant = $product->variants()->firstOrFail();
+    $row_ids = $variant->items()->pluck('id')->all();
+
+    resolve(UpdateProductAction::class)->handle(Product::query()->findOrFail($product->getKey()), [
+        'variants' => [['id' => $variant->getKey(), 'attributes' => ['colour' => 'black']]],
+    ]);
+
+    expect($variant->fresh()->attributes)->toBe(['colour' => 'black'])
+        ->and($variant->items()->pluck('id')->all())->toBe($row_ids)
+        ->and($row_ids)->toHaveCount(1);
+});
+
+it('persists the company_id passed to the create action', function (): void {
+    $company = Company::factory()->create();
+
+    $product = resolve(CreateProductAction::class)->handle(product_write_payload(['company_id' => $company->getKey()]));
+
+    expect(Product::query()->findOrFail($product->getKey())->company_id)->toBe($company->getKey());
+});
+
+it('fills the company_id from the active company when none is passed', function (): void {
+    $company = Company::factory()->create();
+    $payload = product_write_payload();
+    unset($payload['company_id']);
+
+    app()->instance('erp.current_company_id', $company->getKey());
+
+    $product = resolve(CreateProductAction::class)->handle($payload);
+
+    expect(Product::query()->findOrFail($product->getKey())->company_id)->toBe($company->getKey());
+});
+
+it('updates the content order column through the update action', function (): void {
+    $product = resolve(CreateProductAction::class)->handle(product_write_payload());
+
+    resolve(UpdateProductAction::class)->handle(Product::query()->findOrFail($product->getKey()), [
+        'content' => ['order_column' => 7],
+    ]);
+
+    $fresh = Product::query()->findOrFail($product->getKey());
+
+    expect($fresh->order_column)->toBe(7)
+        ->and($fresh->content->order_column)->toBe(7);
+});
+
+it('rejects an explicitly blank title on update and leaves an absent one untouched', function (): void {
+    $product = resolve(CreateProductAction::class)->handle(product_write_payload());
+    $action = resolve(UpdateProductAction::class);
+
+    foreach (['', '   ', null] as $blank) {
+        expect(fn () => $action->handle(Product::query()->findOrFail($product->getKey()), [
+            'featured' => true,
+            'content' => ['title' => $blank],
+        ]))->toThrow(ValidationException::class);
+    }
+
+    $action->handle(Product::query()->findOrFail($product->getKey()), ['content' => ['slug' => 'moon-lamp-2']]);
+
+    $fresh = Product::query()->findOrFail($product->getKey());
+
+    // The refused updates wrote nothing; the slug-only update kept the title.
+    expect($fresh->featured)->toBeFalse()
+        ->and($fresh->title)->toBe('Moon lamp')
+        ->and($fresh->slug)->toBe('moon-lamp-2');
+});
+
+it('updates the content of a product fetched without its content relation', function (): void {
+    $product = resolve(CreateProductAction::class)->handle(product_write_payload());
+
+    resolve(UpdateProductAction::class)->handle(
+        Product::query()->without('content')->findOrFail($product->getKey()),
+        ['content' => ['title' => 'Moon lamp v3', 'slug' => 'moon-lamp-v3']],
+    );
+
+    // The slug is given, so nothing else would load the content before the title is written.
+    expect(Product::query()->findOrFail($product->getKey())->title)->toBe('Moon lamp v3');
+});
