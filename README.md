@@ -44,29 +44,29 @@ Add repository to your `composer.json` file:
 "repositories": [
     {
         "type": "composer",
-        "url": "https://github.com/getlaraplate/laraplate-core.git"
+        "url": "https://github.com/getlaraplate/laracore.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/getlaraplate/laraplate-cms.git"
+        "url": "https://github.com/getlaraplate/laracms.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/getlaraplate/laraplate-erp.git"
+        "url": "https://github.com/getlaraplate/laraerp.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/getlaraplate/laraplate-sao.git"
+        "url": "https://github.com/getlaraplate/larasao.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/getlaraplate/laraplate-shop.git"
+        "url": "https://github.com/getlaraplate/larashop.git"
     }
 ]
 ```
 
 ```bash
-composer require joshbrw/laravel-module-installer getlaraplate/laraplate-core getlaraplate/laraplate-cms getlaraplate/laraplate-erp getlaraplate/laraplate-sao getlaraplate/laraplate-shop
+composer require joshbrw/laravel-module-installer getlaraplate/laracore getlaraplate/laracms getlaraplate/laraerp getlaraplate/larasao getlaraplate/larashop
 ```
 
 Then, you can install the module by running the following command:
