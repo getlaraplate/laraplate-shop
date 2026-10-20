@@ -44,23 +44,23 @@ Add repository to your `composer.json` file:
 "repositories": [
     {
         "type": "composer",
-        "url": "https://github.com/swolley/laraplate-core.git"
+        "url": "https://github.com/getlaraplate/laraplate-core.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/swolley/laraplate-cms.git"
+        "url": "https://github.com/getlaraplate/laraplate-cms.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/swolley/laraplate-erp.git"
+        "url": "https://github.com/getlaraplate/laraplate-erp.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/swolley/laraplate-sao.git"
+        "url": "https://github.com/getlaraplate/laraplate-sao.git"
     },
     {
         "type": "composer",
-        "url": "https://github.com/swolley/laraplate-shop.git"
+        "url": "https://github.com/getlaraplate/laraplate-shop.git"
     }
 ]
 ```
