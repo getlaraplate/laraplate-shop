@@ -1,6 +1,6 @@
 {
-  "name": "swolley/laraplate-shop",
-  "vendor": "swolley",
+  "name": "getlaraplate/laraplate-shop",
+  "vendor": "getlaraplate",
   "description": "Shop Module contains all the necessary functionalities for build up a new Ecommerce system.",
   "version": "v0.1.0",
   "keywords": [
