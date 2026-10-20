@@ -15,9 +15,11 @@ use Modules\Core\Contracts\IMountsRelatedAttributes;
 use Modules\Core\Overrides\Model;
 use Modules\Core\Search\Schema\FieldType;
 use Modules\ERP\Concerns\BelongsToCompany;
+use Modules\Shop\Casts\EntityType;
 use Modules\Shop\Database\Factories\ProductFactory;
 use Modules\Shop\Enums\ProductKind;
 use Modules\Shop\Enums\ShopTables;
+use Modules\Shop\Models\Pivot\Presettable;
 use Override;
 
 /**
@@ -94,6 +96,26 @@ final class Product extends Model implements ExtendsContent, IMountsRelatedAttri
      * content's pending translations and never make it dirty.
      */
     private bool $contentDirtyViaMerge = false;
+
+    /**
+     * A new, unsaved {@see Content} for a product: attached to the Shop product {@see Entity} and its
+     * seeded default preset, never to a new entity. It is staged with {@see self::setTempContent()} and
+     * persisted by the seam's first `save()`. Requires the product entity and its default preset to be
+     * seeded (`ShopDatabaseSeeder`).
+     */
+    public static function newBackingContent(): Content
+    {
+        $entity = Entity::query()->where('type', EntityType::Products)->sole();
+        $presettable = Presettable::query()->where('entity_id', $entity->id)->sole();
+
+        $content = new Content();
+        // Setting presettable_id syncs entity_id from the presettable (HasDynamicContents), so the
+        // product content lands on the seeded Shop product entity without a separate assignment.
+        $content->presettable_id = $presettable->id;
+        $content->valid_from = now();
+
+        return $content;
+    }
 
     #[Override]
     public function contentAlias(): string

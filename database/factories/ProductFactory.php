@@ -10,10 +10,7 @@ use Modules\CMS\Models\Content;
 use Modules\Core\Helpers\LocaleContext;
 use Modules\Core\Overrides\Factory;
 use Modules\ERP\Models\Company;
-use Modules\Shop\Casts\EntityType;
 use Modules\Shop\Enums\ProductKind;
-use Modules\Shop\Models\Entity;
-use Modules\Shop\Models\Pivot\Presettable;
 use Modules\Shop\Models\Product;
 use Override;
 
@@ -60,7 +57,7 @@ final class ProductFactory extends Factory
             return;
         }
 
-        $model->setTempContent($this->makeBackingContent());
+        $model->setTempContent(Product::newBackingContent());
     }
 
     /**
@@ -92,23 +89,5 @@ final class ProductFactory extends Factory
             'title' => $title,
             'slug' => Str::slug($title) . '-' . Str::lower(Str::random(8)),
         ]);
-    }
-
-    /**
-     * A product's body is a CMS {@see Content} created against the Shop product entity and its default
-     * preset — never a new entity (mirrors how the Task 1 tests create a product content).
-     */
-    private function makeBackingContent(): Content
-    {
-        $entity = Entity::query()->where('type', EntityType::Products)->sole();
-        $presettable = Presettable::query()->where('entity_id', $entity->id)->sole();
-
-        $content = new Content();
-        // Setting presettable_id syncs entity_id from the presettable (HasDynamicContents), so the
-        // product content lands on the seeded Shop product entity without a separate assignment.
-        $content->presettable_id = $presettable->id;
-        $content->valid_from = now();
-
-        return $content;
     }
 }
