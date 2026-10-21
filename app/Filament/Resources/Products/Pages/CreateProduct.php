@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Modules\Core\Filament\Utils\HasCloseOrCancelFormAction;
 use Modules\Shop\Actions\Products\CreateProductAction;
 use Modules\Shop\Filament\Resources\Products\ProductResource;
+use Modules\Shop\Filament\Resources\Products\Schemas\ProductForm;
 use Modules\Shop\Filament\Resources\Products\Schemas\ProductWizard;
 use Override;
 
@@ -40,6 +41,6 @@ final class CreateProduct extends CreateRecord
     #[Override]
     protected function handleRecordCreation(array $data): Model
     {
-        return resolve(CreateProductAction::class)->handle(ProductWizard::payload($data));
+        return resolve(CreateProductAction::class)->handle(ProductForm::createPayload($data));
     }
 }

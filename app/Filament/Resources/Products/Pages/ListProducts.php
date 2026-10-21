@@ -18,7 +18,8 @@ final class ListProducts extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make(),
+            // An action is not authorized by the policy on its own: the create page is offered to who may open it.
+            CreateAction::make()->authorize('create'),
         ];
     }
 }

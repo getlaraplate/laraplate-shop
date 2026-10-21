@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Modules\Shop\Providers;
 
+use Illuminate\Support\Facades\Gate;
 use Modules\CMS\Services\ContentExtenderRegistry;
 use Modules\Core\Overrides\ModuleServiceProvider;
 use Modules\Shop\Models\Product;
+use Modules\Shop\Policies\ProductPolicy;
 use Override;
 
 final class ShopServiceProvider extends ModuleServiceProvider
@@ -48,5 +50,13 @@ final class ShopServiceProvider extends ModuleServiceProvider
         if ($this->app->resolved(ContentExtenderRegistry::class)) {
             $this->app->make(ContentExtenderRegistry::class)->register(Product::CONTENT_ALIAS, Product::class);
         }
+    }
+
+    #[Override]
+    public function boot(): void
+    {
+        parent::boot();
+
+        Gate::policy(Product::class, ProductPolicy::class);
     }
 }

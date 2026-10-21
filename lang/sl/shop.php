@@ -11,6 +11,7 @@ return [
     ],
     'fields' => [
         'attributes' => 'Atributi',
+        'company' => 'Podjetje',
         'company_id' => 'Podjetje',
         'featured' => 'Izpostavljeno',
         'is_default' => 'Privzeta različica',
@@ -34,6 +35,12 @@ return [
     'roles' => [
         'component' => 'Komponenta',
         'main' => 'Glavni',
+    ],
+    'tabs' => [
+        'composition' => 'Sestava',
+        'content' => 'Vsebina',
+        'product' => 'Izdelek',
+        'variants' => 'Različice',
     ],
     'validation' => [
         'componentsObject' => 'Komponente morajo biti objekt JSON.',

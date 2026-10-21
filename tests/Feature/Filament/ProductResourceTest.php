@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
+use function Modules\ERP\Helpers\with_company;
+
+use Filament\Actions\CreateAction;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Modules\CMS\Models\Content;
@@ -26,6 +30,10 @@ use Modules\Shop\Models\VariantItem;
 beforeEach(function (): void {
     setupShopEntities();
 
+    // The policy of the resource asks the user of the guard of the panel, so the panel is the current one and the
+    // user signs in on its guard.
+    Filament::setCurrentPanel('admin');
+
     if (! class_exists(App\Models\User::class)) {
         class_alias(User::class, App\Models\User::class);
     }
@@ -40,7 +48,7 @@ beforeEach(function (): void {
     $admin->roles()->attach($superadmin_role);
     $admin->load('roles');
 
-    $this->actingAs($admin);
+    $this->actingAs($admin, Filament::getAuthGuard());
 });
 
 it('registers the product resource under the shop catalog slug with its pages', function (): void {
@@ -340,3 +348,227 @@ it('keeps free-form keys that are numbers', function (): void {
     expect($product->metadata)->toBe([2024 => 'launch'])
         ->and($product->variants->sole()->attributes)->toBe([10 => 'ten']);
 });
+
+it('fills the tabbed form from the stored product, carrying the identity of each variant', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $variant = $product->variants()->sole();
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+        ->assertFormSet([
+            'company_id' => $company->getKey(),
+            'kind' => ProductKind::Physical->value,
+            'is_published_in_shop' => true,
+            'title' => 'Moon lamp',
+            'slug' => 'moon-lamp',
+        ])
+        ->assertFormFieldDisabled('company_id');
+
+    $form_variant = array_values($edit->get('data.variants'))[0];
+
+    expect($form_variant['id'])->toBe($variant->getKey())
+        ->and($form_variant['is_default'])->toBeTrue()
+        ->and(array_values($form_variant['attributes']))->toBe([['key' => 'colour', 'value' => 'white']])
+        ->and(array_values($form_variant['items']))->toHaveCount(1)
+        ->and((int) array_values($form_variant['items'])[0]['item_id'])->toBe($item->getKey())
+        ->and((float) array_values($form_variant['items'])[0]['quantity'])->toBe(2.0);
+});
+
+it('edits a product through the tabbed form', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $variant = $product->variants()->sole();
+    $valid_from = Product::query()->sole()->valid_from;
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
+    $variant_key = array_key_first($edit->get('data.variants'));
+    $item_key = array_key_first($edit->get("data.variants.{$variant_key}.items"));
+
+    $edit->fillForm([
+        'kind' => ProductKind::Digital->value,
+        'featured' => true,
+        'release_date' => '2030-01-15',
+        'title' => 'Sun lamp',
+    ])
+        ->set("data.variants.{$variant_key}.attributes", ['colour' => 'amber'])
+        ->set("data.variants.{$variant_key}.items.{$item_key}.quantity", '5')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $product = Product::query()->with('variants.items')->sole();
+
+    expect($product->company_id)->toBe($company->getKey())
+        ->and($product->kind)->toBe(ProductKind::Digital)
+        ->and($product->featured)->toBeTrue()
+        ->and($product->release_date?->toDateString())->toBe('2030-01-15')
+        ->and($product->title)->toBe('Sun lamp')
+        ->and($product->slug)->toBe('moon-lamp')
+        ->and($product->valid_from)->toEqual($valid_from)
+        ->and($product->variants)->toHaveCount(1)
+        ->and($product->variants->sole()->getKey())->toBe($variant->getKey())
+        ->and($product->variants->sole()->attributes)->toBe(['colour' => 'amber'])
+        ->and($product->variants->sole()->items)->toHaveCount(1)
+        ->and((float) $product->variants->sole()->items->sole()->quantity)->toBe(5.0);
+});
+
+it('clears a release date and the metadata that the form empties', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $product->update(['release_date' => '2030-01-15', 'metadata' => ['origin' => 'IT']]);
+
+    Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+        ->assertFormSet(['release_date' => '2030-01-15', 'metadata' => ['origin' => 'IT']])
+        ->fillForm(['release_date' => null, 'metadata' => []])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $product = Product::query()->sole();
+
+    expect($product->release_date)->toBeNull()
+        ->and($product->metadata)->toBeNull();
+});
+
+it('keeps the variants identity across saves, whether they are old or added in the form', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $first = $product->variants()->sole();
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
+    $edit->callAction(TestAction::make('add')->schemaComponent('variants', schema: 'form'));
+    $added_key = array_keys($edit->get('data.variants'))[1];
+
+    $edit->set("data.variants.{$added_key}.attributes", ['colour' => 'black'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $saved_ids = $product->variants()->orderBy('id')->pluck('id')->all();
+
+    expect($saved_ids)->toHaveCount(2)
+        ->and($saved_ids[0])->toBe($first->getKey());
+
+    // A second save sends the added variant with the id the first save gave it: it is updated, not recreated.
+    $edit->call('save')->assertHasNoFormErrors();
+
+    expect($product->variants()->orderBy('id')->pluck('id')->all())->toBe($saved_ids);
+});
+
+it('removes the variant that the form drops', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item, with_second_variant: true);
+    $default = $product->variants()->where('is_default', true)->sole();
+    $secondary = $product->variants()->where('is_default', false)->sole();
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
+    $secondary_key = collect($edit->get('data.variants'))->search(static fn (array $variant): bool => $variant['id'] === $secondary->getKey());
+
+    $edit->callAction(TestAction::make('delete')->schemaComponent('variants', schema: 'form')->arguments(['item' => $secondary_key]))
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($product->variants()->pluck('id')->all())->toBe([$default->getKey()])
+        ->and($product->variants()->withTrashed()->count())->toBe(2);
+});
+
+it('refuses to save a product whose variants are not exactly one default', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
+    $variant_key = array_key_first($edit->get('data.variants'));
+
+    $edit->set("data.variants.{$variant_key}.is_default", false)
+        ->call('save')
+        ->assertHasErrors(['data.variants']);
+
+    expect($product->variants()->sole()->is_default)->toBeTrue();
+});
+
+it('lists the live products of the active company, titled from their content', function (): void {
+    $company = Company::factory()->create();
+    $other_company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $other_item = Item::factory()->create(['company_id' => $other_company->getKey()]);
+    $live = shop_stored_product($company, $item, 'Moon lamp');
+    $trashed = shop_stored_product($company, $item, 'Sun lamp');
+    $foreign = shop_stored_product($other_company, $other_item, 'Star lamp');
+    $trashed->delete();
+
+    with_company($company->getKey(), function () use ($live, $trashed, $foreign): void {
+        Livewire::test(ListProducts::class)
+            ->loadTable()
+            ->assertCanSeeTableRecords([$live])
+            ->assertCanNotSeeTableRecords([$trashed, $foreign])
+            // A product opens on its edit page: a view or an edit modal would fill the form from bare columns.
+            ->assertTableActionDoesNotExist('view')
+            ->assertTableActionHasUrl('edit', ProductResource::getUrl('edit', ['record' => $live]), $live)
+            ->assertTableColumnStateSet('title', 'Moon lamp', $live)
+            ->assertTableColumnFormattedStateSet('kind', 'Physical', $live)
+            ->assertTableColumnStateSet('company.name', $live->company->name, $live);
+    });
+});
+
+it('opens a product page only to the permissions that guard it', function (array $granted, string $page, bool $opens): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+
+    $this->actingAs(shop_product_user($granted), Filament::getAuthGuard());
+
+    $open = match ($page) {
+        'list' => static fn (): Testable => Livewire::test(ListProducts::class),
+        'create' => static fn (): Testable => Livewire::test(CreateProduct::class),
+        'edit' => static fn (): Testable => Livewire::test(EditProduct::class, ['record' => $product->getKey()]),
+    };
+
+    $opens ? $open()->assertSuccessful() : $open()->assertForbidden();
+})->with([
+    'list without permission' => [[], 'list', false],
+    'list with select' => [['select'], 'list', true],
+    'create with select alone' => [['select'], 'create', false],
+    'create with select and insert' => [['select', 'insert'], 'create', true],
+    'create with insert alone, reading gates the resource' => [['insert'], 'create', false],
+    'edit with select alone' => [['select'], 'edit', false],
+    'edit with select and update' => [['select', 'update'], 'edit', true],
+    'edit with update alone, reading gates the resource' => [['update'], 'edit', false],
+]);
+
+it('maps each product ability to the permission that guards it', function (string $ability, string $operation): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $subject = in_array($ability, ['viewAny', 'create', 'deleteAny', 'restoreAny', 'forceDeleteAny'], true) ? Product::class : $product;
+
+    $guarded = shop_product_user([$operation]);
+    $other = shop_product_user(array_values(array_diff(['select', 'insert', 'update', 'delete', 'restore', 'forceDelete'], [$operation])));
+
+    expect(Gate::forUser($guarded)->allows($ability, $subject))->toBeTrue()
+        ->and(Gate::forUser($other)->allows($ability, $subject))->toBeFalse();
+})->with([
+    'viewAny' => ['viewAny', 'select'],
+    'view' => ['view', 'select'],
+    'create' => ['create', 'insert'],
+    'update' => ['update', 'update'],
+    'delete' => ['delete', 'delete'],
+    'deleteAny' => ['deleteAny', 'delete'],
+    'restore' => ['restore', 'restore'],
+    'restoreAny' => ['restoreAny', 'restore'],
+    'forceDelete' => ['forceDelete', 'forceDelete'],
+    'forceDeleteAny' => ['forceDeleteAny', 'forceDelete'],
+]);
+
+it('offers the create action on the list only to who may insert', function (array $granted, bool $offered): void {
+    $this->actingAs(shop_product_user($granted), Filament::getAuthGuard());
+
+    $list = Livewire::test(ListProducts::class);
+
+    $offered ? $list->assertActionVisible(CreateAction::class) : $list->assertActionHidden(CreateAction::class);
+})->with([
+    'select alone' => [['select'], false],
+    'select and insert' => [['select', 'insert'], true],
+]);

@@ -11,6 +11,7 @@ return [
     ],
     'fields' => [
         'attributes' => 'Attributes',
+        'company' => 'Company',
         'company_id' => 'Company',
         'featured' => 'Featured',
         'is_default' => 'Default variant',
@@ -34,6 +35,12 @@ return [
     'roles' => [
         'component' => 'Component',
         'main' => 'Main',
+    ],
+    'tabs' => [
+        'composition' => 'Composition',
+        'content' => 'Content',
+        'product' => 'Product',
+        'variants' => 'Variants',
     ],
     'validation' => [
         'componentsObject' => 'The components must be a JSON object.',
