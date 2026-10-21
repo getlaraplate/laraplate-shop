@@ -1,0 +1,52 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'entities' => [
+        'products' => [
+            'plural' => 'Products',
+            'singular' => 'Product',
+        ],
+    ],
+    'fields' => [
+        'attributes' => 'Attributes',
+        'company_id' => 'Company',
+        'featured' => 'Featured',
+        'is_default' => 'Default variant',
+        'is_published_in_shop' => 'Published in the shop',
+        'item_id' => 'Item',
+        'items' => 'Composition',
+        'kind' => 'Kind',
+        'metadata' => 'Metadata',
+        'quantity' => 'Quantity',
+        'release_date' => 'Release date',
+        'variants' => 'Variants',
+    ],
+    'kinds' => [
+        'digital' => 'Digital',
+        'display_only' => 'Display only',
+        'physical' => 'Physical',
+    ],
+    'navigation' => [
+        'main' => 'Shop',
+    ],
+    'roles' => [
+        'component' => 'Component',
+        'main' => 'Main',
+    ],
+    'validation' => [
+        'componentsObject' => 'The components must be a JSON object.',
+        'oneDefaultVariant' => 'Exactly one variant must be the default.',
+    ],
+    'wizard' => [
+        'default' => 'default',
+        'steps' => [
+            'composition' => 'Composition',
+            'content' => 'Content',
+            'product' => 'Product',
+            'variants' => 'Variants',
+        ],
+        'variant' => 'Variant',
+    ],
+];
