@@ -111,7 +111,7 @@ final class ProductWizard
         }
 
         if (is_array($metadata) && $metadata !== []) {
-            $payload['metadata'] = array_filter($metadata, is_string(...), ARRAY_FILTER_USE_KEY);
+            $payload['metadata'] = self::stringKeyed($metadata);
         }
 
         return $payload;
@@ -124,7 +124,7 @@ final class ProductWizard
     {
         return [
             Select::make('company_id')
-                ->options(static fn (): array => Company::query()->orderBy('name')->pluck('name', 'id')->all())
+                ->options(static fn (): array => Company::query()->orderBy('name')->get()->pluck('name', 'id')->all())
                 ->default(static fn (): ?int => current_company_id())
                 ->searchable()
                 ->required(),
@@ -183,6 +183,11 @@ final class ProductWizard
             ])
             ->default([['is_default' => true]])
             ->minItems(1)
+            // The composition repeater below edits the same state path and re-indexes it (uuid keys to a list)
+            // when it dehydrates. If this one re-indexed too, the composition repeater's nested `items` paths
+            // would no longer exist and `data_set` would create a phantom variant per item path. So only the
+            // LAST repeater on the path may re-index: the composition repeater MUST stay after this one.
+            ->mutateDehydratedStateUsing(static fn (?array $state): ?array => $state)
             ->itemLabel(static fn (array $state): string => self::variantLabel($state))
             ->rules([
                 static fn (): Closure => static function (string $attribute, mixed $value, Closure $fail): void {
@@ -206,12 +211,15 @@ final class ProductWizard
             ->schema([
                 Repeater::make('items')
                     ->schema([
+                        // `../../../../company_id`: item, items repeater, variant, variants repeater, then the form.
                         Select::make('item_id')
                             ->options(static fn (Get $get): array => self::itemOptions($get('../../../../company_id')))
                             ->getSearchResultsUsing(static fn (string $search, Get $get): array => self::itemOptions($get('../../../../company_id'), $search))
                             ->getOptionLabelUsing(static fn (mixed $value): ?string => self::itemLabel($value))
                             ->searchable()
                             ->preload()
+                            // Among the rows of one variant: an item composes a variant at most once.
+                            ->distinct()
                             ->required(),
                         TextInput::make('quantity')
                             ->numeric()
@@ -280,7 +288,14 @@ final class ProductWizard
     }
 
     /**
+     * The variants of the state, which must hold exactly one default. A real variant always carries an
+     * `is_default` key (its toggle emits one); an entry without it is a leftover of the shared state path
+     * and is not a variant.
+     *
      * @param  array<string, mixed>  $state
+     *
+     * @throws ValidationException
+     *
      * @return list<VariantEntry>
      */
     private static function variantsPayload(array $state): array
@@ -288,9 +303,19 @@ final class ProductWizard
         $variants = [];
 
         foreach (Arr::wrap($state['variants'] ?? []) as $variant) {
-            if (is_array($variant)) {
+            if (is_array($variant) && array_key_exists('is_default', $variant)) {
                 $variants[] = self::variantPayload($variant);
             }
+        }
+
+        // The composition repeater shares the variants path, so its rules replace those of the variants step
+        // at submit: the invariant is checked here too, where nothing can skip it.
+        $defaults = count(array_filter($variants, static fn (array $variant): bool => ($variant['is_default'] ?? false) === true));
+
+        if ($defaults !== 1) {
+            throw ValidationException::withMessages([
+                'data.variants' => [__('shop.validation.oneDefaultVariant')],
+            ]);
         }
 
         return $variants;
@@ -313,9 +338,27 @@ final class ProductWizard
 
         return [
             'is_default' => ($variant['is_default'] ?? false) === true,
-            'attributes' => is_array($attributes) && $attributes !== [] ? array_filter($attributes, is_string(...), ARRAY_FILTER_USE_KEY) : null,
+            'attributes' => is_array($attributes) && $attributes !== [] ? self::stringKeyed($attributes) : null,
             'items' => $items,
         ];
+    }
+
+    /**
+     * A key-value map keyed by strings. PHP stores a numeric key such as `"2024"` as an integer, so the keys
+     * are rebuilt from their string form rather than dropped.
+     *
+     * @param  array<mixed>  $map
+     * @return array<string, mixed>
+     */
+    private static function stringKeyed(array $map): array
+    {
+        $keyed = [];
+
+        foreach ($map as $key => $value) {
+            $keyed[(string) $key] = $value;
+        }
+
+        return $keyed;
     }
 
     /**
@@ -356,16 +399,16 @@ final class ProductWizard
         }
 
         return Item::query()
-            ->where('company_id', (int) $company_id)
+            ->whereIn('company_id', [(int) $company_id])
             ->when(filled($search), static fn (Builder $query): Builder => $query->where(
                 static fn (Builder $query): Builder => $query
-                    ->where('name', 'like', "%{$search}%")
-                    ->orWhere('sku', 'like', "%{$search}%"),
+                    ->whereLike('name', "%{$search}%")
+                    ->orWhereLike('sku', "%{$search}%"),
             ))
             ->orderBy('name')
             ->limit(self::OPTION_LIMIT)
             ->get()
-            ->mapWithKeys(static fn (Item $item): array => [(int) $item->getKey() => "{$item->name} ({$item->sku})"])
+            ->mapWithKeys(static fn (Item $item): array => [(int) $item->id => "{$item->name} ({$item->sku})"])
             ->all();
     }
 

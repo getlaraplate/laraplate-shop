@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Support\Arr;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Modules\CMS\Models\Content;
 use Modules\CMS\Models\Translations\ContentTranslation;
@@ -40,37 +42,6 @@ beforeEach(function (): void {
 
     $this->actingAs($admin);
 });
-
-/**
- * The state of a complete wizard: the four steps of a physical product with one default variant composed of
- * one item. Any key can be replaced by the caller.
- *
- * @param  array<string, mixed>  $overrides
- * @return array<string, mixed>
- */
-function product_wizard_state(Company $company, Item $item, array $overrides = []): array
-{
-    return array_merge([
-        'company_id' => $company->getKey(),
-        'kind' => ProductKind::Physical->value,
-        'is_published_in_shop' => true,
-        'featured' => false,
-        'title' => 'Moon lamp',
-        'slug' => 'moon-lamp',
-        'components' => json_encode(['content' => ['blocks' => [['type' => 'paragraph', 'data' => ['text' => 'A lamp']]]]]),
-        'valid_from' => now()->subDay()->toDateTimeString(),
-        'valid_to' => null,
-        'variants' => [
-            [
-                'is_default' => true,
-                'attributes' => ['colour' => 'white'],
-                'items' => [
-                    ['item_id' => $item->getKey(), 'quantity' => '2', 'role' => VariantItem::ROLE_MAIN],
-                ],
-            ],
-        ],
-    ], $overrides);
-}
 
 it('registers the product resource under the shop catalog slug with its pages', function (): void {
     expect(ProductResource::getModel())->toBe(Product::class)
@@ -226,4 +197,146 @@ it('offers only the items of the company of the product', function (): void {
         ])
         ->assertSee('Walnut shade')
         ->assertDontSee('Oak base');
+});
+
+/**
+ * The wizard opened on the content every product needs, with the variants as the form builds them: keyed by
+ * the uuids the repeaters generate, as a browser sends them (`fillForm` would replace them with list indexes).
+ */
+function product_wizard_opened_on_default_variants(Company $company): Testable
+{
+    return Livewire::test(CreateProduct::class)->fillForm([
+        'company_id' => $company->getKey(),
+        'title' => 'Moon lamp',
+        'slug' => 'moon-lamp',
+        'components' => '{}',
+    ]);
+}
+
+it('creates only the default variant the form shows when it is left untouched', function (): void {
+    product_wizard_opened_on_default_variants(Company::factory()->create())
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $variants = Product::query()->sole()->variants;
+
+    expect($variants)->toHaveCount(1)
+        ->and($variants->sole()->is_default)->toBeTrue();
+});
+
+it('creates one variant per repeater item after variants are added and deleted', function (): void {
+    $wizard = product_wizard_opened_on_default_variants(Company::factory()->create());
+    $first = array_key_first($wizard->get('data.variants'));
+
+    $wizard->callAction(TestAction::make('add')->schemaComponent('variants', schema: 'form'));
+
+    $second = array_keys($wizard->get('data.variants'))[1];
+
+    $wizard->set("data.variants.{$second}.attributes", ['colour' => 'black'])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(Product::query()->sole()->variants()->count())->toBe(2);
+
+    // The same walk, this time giving the default to the added variant and deleting the first one.
+    $wizard = product_wizard_opened_on_default_variants(Company::factory()->create());
+    $first = array_key_first($wizard->get('data.variants'));
+    $wizard->set('data.slug', 'moon-lamp-black')
+        ->callAction(TestAction::make('add')->schemaComponent('variants', schema: 'form'));
+    $second = array_keys($wizard->get('data.variants'))[1];
+
+    $wizard->set("data.variants.{$second}.is_default", true)
+        ->set("data.variants.{$second}.attributes", ['colour' => 'black'])
+        ->set("data.variants.{$first}.is_default", false)
+        ->callAction(TestAction::make('delete')->schemaComponent('variants', schema: 'form')->arguments(['item' => $first]))
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $variant = Product::query()->latest('id')->first()->variants->sole();
+
+    expect($variant->is_default)->toBeTrue()
+        ->and($variant->attributes)->toBe(['colour' => 'black']);
+});
+
+it('composes a variant through the item added in the composition step', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $wizard = product_wizard_opened_on_default_variants($company);
+    $variant_key = array_key_first($wizard->get('data.variants'));
+
+    $wizard->callAction(TestAction::make('add')->schemaComponent("composition.{$variant_key}.items", schema: 'form'));
+
+    $item_key = array_key_first($wizard->get("data.variants.{$variant_key}.items"));
+
+    $wizard->set("data.variants.{$variant_key}.items.{$item_key}.item_id", $item->getKey())
+        ->set("data.variants.{$variant_key}.items.{$item_key}.quantity", '3')
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $variants = Product::query()->sole()->variants()->with('items')->get();
+
+    expect($variants)->toHaveCount(1)
+        ->and($variants->sole()->items)->toHaveCount(1)
+        ->and($variants->sole()->items->sole()->item_id)->toBe($item->getKey())
+        ->and((float) $variants->sole()->items->sole()->quantity)->toBe(3.0);
+});
+
+it('refuses to create a product whose variants are not exactly one default', function (array $variants): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+
+    Livewire::test(CreateProduct::class)
+        ->fillForm(product_wizard_state($company, $item, ['variants' => $variants]))
+        ->call('create')
+        ->assertHasErrors(['data.variants']);
+
+    expect(Product::query()->count())->toBe(0)
+        ->and(Content::withExtended()->count())->toBe(0);
+})->with([
+    'no variant' => [[]],
+    'no default' => [[['is_default' => false]]],
+    'two defaults' => [[['is_default' => true], ['is_default' => true]]],
+]);
+
+it('lets two variants share an item but not one variant list it twice', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $row = ['item_id' => $item->getKey(), 'quantity' => '1', 'role' => VariantItem::ROLE_MAIN];
+
+    Livewire::test(CreateProduct::class)
+        ->fillForm(product_wizard_state($company, $item, ['variants' => [
+            ['is_default' => true, 'items' => [$row]],
+            ['is_default' => false, 'items' => [$row]],
+        ]]))
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(VariantItem::query()->count())->toBe(2);
+
+    Livewire::test(CreateProduct::class)
+        ->fillForm(product_wizard_state($company, $item, ['slug' => 'moon-lamp-twice', 'variants' => [
+            ['is_default' => true, 'items' => [$row, [...$row, 'role' => VariantItem::ROLE_COMPONENT]]],
+        ]]))
+        ->call('create')
+        ->assertHasFormErrors(['variants.0.items.1.item_id']);
+
+    expect(Product::query()->count())->toBe(1);
+});
+
+it('keeps free-form keys that are numbers', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+
+    Livewire::test(CreateProduct::class)
+        ->fillForm(product_wizard_state($company, $item, [
+            'metadata' => ['2024' => 'launch'],
+            'variants' => [['is_default' => true, 'attributes' => ['10' => 'ten']]],
+        ]))
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $product = Product::query()->with('variants')->sole();
+
+    expect($product->metadata)->toBe([2024 => 'launch'])
+        ->and($product->variants->sole()->attributes)->toBe([10 => 'ten']);
 });

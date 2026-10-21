@@ -14,6 +14,7 @@ final class ListProducts extends ListRecords
     #[Override]
     protected static string $resource = ProductResource::class;
 
+    #[Override]
     protected function getHeaderActions(): array
     {
         return [
