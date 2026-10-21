@@ -24,6 +24,9 @@ return [
         'release_date' => 'Datum izida',
         'variants' => 'Različice',
     ],
+    'items' => [
+        'discontinued' => 'ukinjen',
+    ],
     'kinds' => [
         'digital' => 'Digitalni',
         'display_only' => 'Samo prikaz',
@@ -45,6 +48,7 @@ return [
     'validation' => [
         'componentsObject' => 'Komponente morajo biti objekt JSON.',
         'oneDefaultVariant' => 'Natanko ena različica mora biti privzeta.',
+        'saveRefused' => 'Izdelka ni bilo mogoče shraniti.',
     ],
     'wizard' => [
         'default' => 'privzeta',

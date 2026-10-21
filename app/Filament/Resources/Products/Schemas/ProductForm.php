@@ -22,6 +22,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Modules\CMS\Filament\Resources\Contents\Schemas\ContentForm;
@@ -154,6 +155,9 @@ final class ProductForm
                 ])
                 ->default([['is_default' => true]])
                 ->minItems(1)
+                // The order is stored once, by the order the rows are created in. An edit does not change it, so
+                // offering to reorder there would be a silent no-op.
+                ->reorderable(static fn (string $operation): bool => $operation === 'create')
                 // The composition repeater below edits the same state path and re-indexes it (uuid keys to a list)
                 // when it dehydrates. If this one re-indexed too, the composition repeater's nested `items` paths
                 // would no longer exist and `data_set` would create a phantom variant per item path. So only the
@@ -212,6 +216,8 @@ final class ProductForm
                         ])
                         ->columns(3)
                         ->defaultItems(0)
+                        // Stored by the order the rows are created in, as the variants are.
+                        ->reorderable(static fn (string $operation): bool => $operation === 'create')
                         ->columnSpanFull(),
                 ])
                 ->defaultItems(0)
@@ -234,7 +240,7 @@ final class ProductForm
         $components = $product->components;
         $variants = [];
 
-        foreach ($product->variants()->with('items')->orderBy('id')->get() as $variant) {
+        foreach ($product->variants()->with(['items' => static fn (HasMany $items): HasMany => $items->orderBy('id')])->orderBy('id')->get() as $variant) {
             $variants[] = [
                 'id' => $variant->getKey(),
                 'is_default' => $variant->is_default,
@@ -555,8 +561,16 @@ final class ProductForm
 
     private static function itemLabel(mixed $item_id): ?string
     {
-        $item = is_numeric($item_id) ? Item::query()->find((int) $item_id) : null;
+        // A discontinued item stays on the rows that compose with it ({@see VariantItem::item()} reads it trashed),
+        // so it needs a label: without one the select refuses the row and the product cannot be saved.
+        $item = is_numeric($item_id) ? Item::query()->withTrashed()->find((int) $item_id) : null;
 
-        return $item instanceof Item ? "{$item->name} ({$item->sku})" : null;
+        if (! $item instanceof Item) {
+            return null;
+        }
+
+        $label = "{$item->name} ({$item->sku})";
+
+        return $item->trashed() ? $label . ' (' . __('shop.items.discontinued') . ')' : $label;
     }
 }

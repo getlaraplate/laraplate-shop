@@ -24,6 +24,9 @@ return [
         'release_date' => 'Veröffentlichungsdatum',
         'variants' => 'Varianten',
     ],
+    'items' => [
+        'discontinued' => 'eingestellt',
+    ],
     'kinds' => [
         'digital' => 'Digital',
         'display_only' => 'Nur Anzeige',
@@ -45,6 +48,7 @@ return [
     'validation' => [
         'componentsObject' => 'Die Komponenten müssen ein JSON-Objekt sein.',
         'oneDefaultVariant' => 'Genau eine Variante muss die Standardvariante sein.',
+        'saveRefused' => 'Das Produkt konnte nicht gespeichert werden.',
     ],
     'wizard' => [
         'default' => 'Standard',

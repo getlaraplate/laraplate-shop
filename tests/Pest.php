@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Once;
 use Illuminate\Support\Str;
 use Modules\Core\Models\Permission;
 use Modules\Core\Models\User;
@@ -18,6 +19,7 @@ use Modules\Shop\Enums\ProductKind;
 use Modules\Shop\Models\Entity;
 use Modules\Shop\Models\Pivot\Presettable;
 use Modules\Shop\Models\Product;
+use Modules\Shop\Models\ProductVariant;
 use Modules\Shop\Models\VariantItem;
 use Modules\Shop\Tests\TestCase;
 
@@ -144,4 +146,28 @@ function shop_product_user(array $operations): User
     }
 
     return $user;
+}
+
+/**
+ * Registers the `select` and `update` permissions of the tables that hold the parts of a product (its variants and
+ * their composition rows), on the guard of the admin panel. Once they exist the model layer enforces them on every
+ * read and write of those parts, on top of the permissions of the products table.
+ *
+ * @return array{select: list<Permission>, update: list<Permission>}
+ */
+function shop_register_part_permissions(): array
+{
+    $permissions = ['select' => [], 'update' => []];
+
+    foreach ([ProductVariant::class, VariantItem::class] as $model_class) {
+        foreach (array_keys($permissions) as $operation) {
+            $permissions[$operation][] = Permission::findOrCreate(PermissionName::forClass($model_class, $operation), Filament::getPanel('admin')->getAuthGuard());
+        }
+    }
+
+    // Whether a permission exists is memoized for the process, and the writes before this call recorded that these
+    // did not: forget those answers so the data layer sees the registered names.
+    Once::flush();
+
+    return $permissions;
 }

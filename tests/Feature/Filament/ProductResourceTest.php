@@ -5,8 +5,10 @@ declare(strict_types=1);
 use function Modules\ERP\Helpers\with_company;
 
 use Filament\Actions\CreateAction;
+use Filament\Actions\EditAction;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Repeater;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Features\SupportTesting\Testable;
@@ -572,3 +574,113 @@ it('offers the create action on the list only to who may insert', function (arra
     'select alone' => [['select'], false],
     'select and insert' => [['select', 'insert'], true],
 ]);
+
+it('opens and saves a product whose composition holds a discontinued item', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $item->delete();
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+        ->assertSee('(discontinued)');
+    $variant_key = array_key_first($edit->get('data.variants'));
+    $item_key = array_key_first($edit->get("data.variants.{$variant_key}.items"));
+
+    $edit->fillForm(['title' => 'Sun lamp'])
+        ->set("data.variants.{$variant_key}.items.{$item_key}.quantity", '7')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $row = VariantItem::query()->sole();
+
+    expect(Product::query()->sole()->title)->toBe('Sun lamp')
+        ->and($row->item_id)->toBe($item->getKey())
+        ->and((float) $row->quantity)->toBe(7.0);
+});
+
+it('links the table edit to the page, with no action of its own to forge', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+
+    $list = Livewire::test(ListProducts::class)->loadTable();
+
+    $action = $list->instance()->getTable()->getAction('edit');
+
+    // Core's edit action would run `$record->update($data)` on the bare columns, outside the write action.
+    expect($action)->not->toBeInstanceOf(EditAction::class)
+        ->and($action?->getActionFunction())->toBeNull();
+
+    $list->callTableAction('edit', $product, ['kind' => ProductKind::Digital->value, 'featured' => true]);
+
+    $stored = Product::query()->sole();
+
+    expect($stored->kind)->toBe(ProductKind::Physical)
+        ->and($stored->featured)->toBeFalse();
+});
+
+it('shows why a save is refused, instead of failing silently', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
+
+    // Another admin removed the variant after this form was opened: the form still names it.
+    $product->variants()->sole()->delete();
+
+    $edit->fillForm(['title' => 'Sun lamp'])
+        ->call('save')
+        ->assertHasErrors(['data.variants.0.id'])
+        ->assertNotified(__('shop.validation.saveRefused'));
+
+    expect(Product::query()->sole()->title)->toBe('Moon lamp');
+});
+
+it('saves a variant edit only for a user who may also write the variant tables', function (bool $may_write_parts): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $product = shop_stored_product($company, $item);
+    $part_permissions = shop_register_part_permissions();
+    $user = shop_product_user(['select', 'update']);
+
+    // Reading the parts is granted to both, so the form opens for both: only the write tells them apart.
+    $user->givePermissionTo($part_permissions['select']);
+
+    if ($may_write_parts) {
+        $user->givePermissionTo($part_permissions['update']);
+    }
+
+    $this->actingAs($user, Filament::getAuthGuard());
+
+    $edit = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
+    $variant_key = array_key_first($edit->get('data.variants'));
+
+    $edit->fillForm(['featured' => true])
+        ->set("data.variants.{$variant_key}.attributes", ['colour' => 'amber']);
+
+    if ($may_write_parts) {
+        $edit->call('save')->assertHasNoFormErrors();
+    } else {
+        // The part is refused by the data layer, which rolls the whole save back, the product columns included.
+        $edit->call('save')->assertForbidden();
+    }
+
+    $stored = Product::query()->with('variants')->sole();
+
+    expect($stored->featured)->toBe($may_write_parts)
+        ->and($stored->variants->sole()->attributes)->toBe($may_write_parts ? ['colour' => 'amber'] : ['colour' => 'white']);
+})->with([
+    'with the update permissions of the parts' => [true],
+    'without them' => [false],
+]);
+
+it('lets the variants be reordered only while creating, the one time the order is stored', function (): void {
+    Livewire::test(CreateProduct::class)
+        ->assertFormComponentExists('variants', static fn (Repeater $variants): bool => $variants->isReorderable());
+
+    $product = shop_stored_product(Company::factory()->create(), Item::factory()->create());
+
+    Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+        ->assertFormComponentExists('variants', static fn (Repeater $variants): bool => ! $variants->isReorderable());
+});

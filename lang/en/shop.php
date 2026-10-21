@@ -24,6 +24,9 @@ return [
         'release_date' => 'Release date',
         'variants' => 'Variants',
     ],
+    'items' => [
+        'discontinued' => 'discontinued',
+    ],
     'kinds' => [
         'digital' => 'Digital',
         'display_only' => 'Display only',
@@ -45,6 +48,7 @@ return [
     'validation' => [
         'componentsObject' => 'The components must be a JSON object.',
         'oneDefaultVariant' => 'Exactly one variant must be the default.',
+        'saveRefused' => 'The product could not be saved.',
     ],
     'wizard' => [
         'default' => 'default',

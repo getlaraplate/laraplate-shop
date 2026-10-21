@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Modules\Shop\Filament\Resources\Products\Tables;
 
+use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -43,17 +45,23 @@ final class ProductsTable
                 ]);
             },
             actions: static function (Collection $default_actions): void {
-                // The view and edit modals would fill the product form from the bare columns and save them without
-                // the write action: a product is opened on its edit page, which loads and saves the whole aggregate.
+                // Core's view and edit actions open a modal over the resource form: the edit one fills it from the
+                // bare columns and saves them with `$record->update()`, outside the write action and its transaction.
+                // They are taken out. A product is opened by a link to its edit page, which loads and saves the whole
+                // aggregate, and the link has no action to run, so there is nothing for a forged call to reach.
                 foreach ($default_actions as $key => $action) {
-                    if ($action instanceof ViewAction) {
+                    if ($action instanceof ViewAction || $action instanceof EditAction) {
                         $default_actions->forget($key);
                     }
-
-                    if ($action instanceof EditAction) {
-                        $action->modal(false)->url(static fn (Product $record): string => ProductResource::getUrl('edit', ['record' => $record]));
-                    }
                 }
+
+                $default_actions->prepend(
+                    Action::make('edit')
+                        ->hiddenLabel()
+                        ->icon(Heroicon::PencilSquare)
+                        ->url(static fn (Product $record): string => ProductResource::getUrl('edit', ['record' => $record]))
+                        ->visible(static fn (Product $record): bool => ProductResource::canEdit($record)),
+                );
             },
         )
             ->defaultSort('id', 'desc');

@@ -18,7 +18,14 @@ use Modules\Shop\Models\Product;
  *
  * The permission is asked the way the model layer asks it when it reads or writes a product
  * ({@see AuthorizationService::userHolds()}): a super admin passes, anybody else needs a grant on the guard of the
- * request, and a permission that does not exist is not held. The policy and the data layer therefore never disagree.
+ * request, and a permission that does not exist is not held.
+ *
+ * The policy gates the pages, and only by the products table. The variants and their composition rows are parts of
+ * the product ({@see \Modules\Core\Contracts\IsPartOfParent}), and the model layer checks the permissions of their
+ * own tables (`shop_product_variants`, `shop_variant_items`) on every write of them, once those permissions are
+ * registered. Managing a product therefore takes the permissions of the variant tables as well: a user holding only
+ * those of `shop_products` opens the pages, and a save that touches a variant is refused there and rolled back.
+ * Failing closed is intended, so the policy does not repeat the checks of the parts.
  */
 final class ProductPolicy
 {

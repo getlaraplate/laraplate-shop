@@ -24,6 +24,9 @@ return [
         'release_date' => 'Fecha de lanzamiento',
         'variants' => 'Variantes',
     ],
+    'items' => [
+        'discontinued' => 'descatalogado',
+    ],
     'kinds' => [
         'digital' => 'Digital',
         'display_only' => 'Solo exposición',
@@ -45,6 +48,7 @@ return [
     'validation' => [
         'componentsObject' => 'Los componentes deben ser un objeto JSON.',
         'oneDefaultVariant' => 'Exactamente una variante debe ser la predeterminada.',
+        'saveRefused' => 'No se pudo guardar el producto.',
     ],
     'wizard' => [
         'default' => 'predeterminada',
