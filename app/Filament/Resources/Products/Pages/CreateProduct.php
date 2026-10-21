@@ -8,8 +8,10 @@ use Filament\Resources\Pages\CreateRecord;
 use Filament\Resources\Pages\CreateRecord\Concerns\HasWizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 use Modules\Core\Filament\Utils\HasCloseOrCancelFormAction;
 use Modules\Shop\Actions\Products\CreateProductAction;
+use Modules\Shop\Filament\Resources\Products\Concerns\HandlesProductWriteErrors;
 use Modules\Shop\Filament\Resources\Products\ProductResource;
 use Modules\Shop\Filament\Resources\Products\Schemas\ProductForm;
 use Modules\Shop\Filament\Resources\Products\Schemas\ProductWizard;
@@ -21,6 +23,7 @@ use Override;
  */
 final class CreateProduct extends CreateRecord
 {
+    use HandlesProductWriteErrors;
     use HasCloseOrCancelFormAction;
     use HasWizard;
 
@@ -37,10 +40,14 @@ final class CreateProduct extends CreateRecord
 
     /**
      * @param  array<string, mixed>  $data
+     *
+     * @throws ValidationException
      */
     #[Override]
     protected function handleRecordCreation(array $data): Model
     {
-        return resolve(CreateProductAction::class)->handle(ProductForm::createPayload($data));
+        return $this->writeThroughAction(
+            fn (): Model => resolve(CreateProductAction::class)->handle(ProductForm::createPayload($data)),
+        );
     }
 }

@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Modules\Shop\Filament\Resources\Products\Pages;
 
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Modules\Core\Filament\Utils\HasCloseOrCancelFormAction;
 use Modules\Shop\Actions\Products\UpdateProductAction;
+use Modules\Shop\Filament\Resources\Products\Concerns\HandlesProductWriteErrors;
 use Modules\Shop\Filament\Resources\Products\ProductResource;
 use Modules\Shop\Filament\Resources\Products\Schemas\ProductForm;
 use Modules\Shop\Models\Product;
@@ -28,6 +27,7 @@ use Override;
  */
 final class EditProduct extends EditRecord
 {
+    use HandlesProductWriteErrors;
     use HasCloseOrCancelFormAction;
 
     #[Override]
@@ -56,9 +56,8 @@ final class EditProduct extends EditRecord
     }
 
     /**
-     * The action refuses with the keys of its payload (`content.title`, `variants.0.id`), which name no field of
-     * the form: they are put under `data.`, content fields as the form names them, and said in a notification, so
-     * a save that fails (a variant removed meanwhile, say) never looks like it did nothing.
+     * A save that fails (a variant removed meanwhile, say) must never look like it did nothing: the refusal is
+     * said and re-keyed onto the form through {@see HandlesProductWriteErrors}.
      *
      * @param  array<string, mixed>  $data
      *
@@ -68,34 +67,8 @@ final class EditProduct extends EditRecord
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
         /** @var Product $record */
-        try {
-            return resolve(UpdateProductAction::class)->handle($record, ProductForm::updatePayload($data));
-        } catch (ValidationException $exception) {
-            Notification::make()
-                ->danger()
-                ->title(__('shop.validation.saveRefused'))
-                ->body(implode(' ', Arr::flatten($exception->errors())))
-                ->send();
-
-            $errors = [];
-
-            foreach ($exception->errors() as $key => $messages) {
-                $errors[self::formKey($key)] = $messages;
-            }
-
-            throw ValidationException::withMessages($errors);
-        }
-    }
-
-    /**
-     * Where the form keeps what the action names with `key`: under `data`, a content field as a field of the form.
-     */
-    private static function formKey(string $key): string
-    {
-        return match (true) {
-            str_starts_with($key, 'data.') => $key,
-            str_starts_with($key, 'content.') => 'data.' . mb_substr($key, mb_strlen('content.')),
-            default => 'data.' . $key,
-        };
+        return $this->writeThroughAction(
+            fn (): Model => resolve(UpdateProductAction::class)->handle($record, ProductForm::updatePayload($data)),
+        );
     }
 }

@@ -291,6 +291,26 @@ it('composes a variant through the item added in the composition step', function
         ->and((float) $variants->sole()->items->sole()->quantity)->toBe(3.0);
 });
 
+it('surfaces a model refusal on the create wizard instead of letting it pass silently', function (): void {
+    $company = Company::factory()->create();
+    $item = Item::factory()->create(['company_id' => $company->getKey()]);
+    $wizard = product_wizard_opened_on_default_variants($company);
+    $variant_key = array_key_first($wizard->get('data.variants'));
+
+    $wizard->callAction(TestAction::make('add')->schemaComponent("composition.{$variant_key}.items", schema: 'form'));
+
+    $item_key = array_key_first($wizard->get("data.variants.{$variant_key}.items"));
+
+    // Five decimals: the column is `decimal(15,4)`, so the model refuses the create with the key `quantity`.
+    $wizard->set("data.variants.{$variant_key}.items.{$item_key}.item_id", $item->getKey())
+        ->set("data.variants.{$variant_key}.items.{$item_key}.quantity", '1.23456')
+        ->call('create')
+        ->assertHasErrors(['data.quantity']);
+
+    expect(Product::query()->count())->toBe(0)
+        ->and(VariantItem::query()->count())->toBe(0);
+});
+
 it('refuses to create a product whose variants are not exactly one default', function (array $variants): void {
     $company = Company::factory()->create();
     $item = Item::factory()->create(['company_id' => $company->getKey()]);
