@@ -5,10 +5,11 @@ support into a storefront.
 
 ## Status
 
-Catalog foundation only. The module ships the product catalog core (product,
-variant, variant composition) and the seed of the product content entity. It has
-no stock, cart, checkout or payment behaviour, and no write, API or Filament
-surface yet (see «Not in this module yet»).
+Catalog foundation plus a backoffice write surface. The module ships the product
+catalog core (product, variant, variant composition), the seed of the product
+content entity, and the actions and Filament resource that create and edit a
+whole product (see «Admin write surface»). It has no stock, cart, checkout or
+payment behaviour, and no read or API surface yet (see «Not in this module yet»).
 
 The module is enabled in the committed `modules_statuses.json`. Enabling it registers
 `shop.product` as the first production content extender in the CMS
@@ -170,9 +171,10 @@ the way CMS `Contributor` surfaces its `User`.
   `content` field), but on `Product` `content` is also the relation method from
   `ExtendsContentTrait`, so `isNativeKey('content')` is true. `$product->content`
   therefore always returns the `Content` model, never the body value. Read and write
-  the body through the merged content: `$product->content->content`. A future write
-  surface (plan #2) must special-case the `content` key, or expose a dedicated
-  `body` accessor/mutator that delegates to the merged `Content`.
+  the body through the merged content: `$product->content->content`. The product
+  write actions sidestep the key: `content` is not one of their content fields (see
+  «Admin write surface»), and the dynamic fields, the body included, travel as the
+  translatable `components` object.
 
 ### Lifecycle
 
@@ -321,6 +323,154 @@ ERP `Item`s (E7b).
   timestamps) that leaves out soft-deleted items and soft-deleted composition
   rows.
 
+## Admin write surface
+
+A product is created and edited as one aggregate: the `Product`, its CMS `Content`
+(through the content-extension seam), its `ProductVariant`s and their `VariantItem`
+composition. Three domain actions write it, and the Filament resource is a thin form
+over them. The actions are the single write path: the panel and any future caller
+(an API, an importer) go through them, never through the models directly.
+
+### Write actions
+
+`app/Actions/Products/`, all `final`, injected through the container.
+
+- **`CreateProductAction::handle(array $data): Product`** builds the aggregate in
+  one transaction, derived from the owning model (`$product->getConnection()`).
+  `Product::newBackingContent()` returns a new, unsaved `Content` attached to the
+  seeded Shop product entity and its default preset (it needs `ShopDatabaseSeeder`
+  to have run; it throws when the entity or preset is missing). The action fills it
+  with the content fields of the payload, stages it with `setTempContent()` and
+  saves the product, so the seam persists and links the content on the first save.
+  It then hands the variants to `SyncProductVariantsAction`.
+- **`UpdateProductAction::handle(Product $product, array $data): Product`** updates
+  the product columns and merges the content fields onto the product root, so the
+  product's `saving` hook flushes the content, translatable fields included. Only the
+  keys present in the payload are touched. The variants are synced only when the
+  payload carries a `variants` key; an absent key leaves them as they are. The tenant
+  (`company_id`) never changes. It returns the refreshed product.
+- **`SyncProductVariantsAction::handle(Product $product, array $variants): void`**
+  brings the variants and their composition in line with the payload, which is the
+  desired final state. A variant entry with an `id` updates that variant (an `id`
+  that is not one of the product's variants raises a `ValidationException` on
+  `variants.{n}.id`), one without creates a new variant, and a live variant that is
+  not listed is soft-deleted. Inside a variant the composition rows are matched by
+  `item_id`: a listed item is updated or added, an unlisted one is removed, and a
+  variant entry without an `items` key leaves its composition alone.
+
+Payload (create; update takes the same shape without `company_id`):
+
+```php
+[
+    'company_id' => 1,                 // create only; defaults to the current company
+    'kind' => 'physical',
+    'is_published_in_shop' => true,
+    'featured' => false,
+    'release_date' => '2026-11-01',
+    'metadata' => ['k' => 'v'],
+    'content' => ['title' => 'T', 'slug' => 't', 'components' => [], 'valid_from' => '...', 'valid_to' => null, 'order_column' => 1],
+    'variants' => [
+        ['id' => 7, 'is_default' => true, 'attributes' => ['size' => 'M'],
+            'items' => [['item_id' => 3, 'quantity' => '2', 'role' => 'main']]],
+    ],
+]
+```
+
+- **Allowlists.** `CreateProductAction::COLUMNS` (`kind`, `is_published_in_shop`,
+  `featured`, `release_date`, `metadata`) bounds the product columns and
+  `CreateProductAction::CONTENT_FIELDS` (`title`, `slug`, `components`, `valid_from`,
+  `valid_to`, `order_column`) bounds the content fields. Any other key is dropped, so
+  content keys are never mass-assigned onto the product. The translatable fields
+  (`title`, `slug`, `components`) are written in the current locale.
+- **Title.** A create needs a non-blank string `content.title`; an update refuses a
+  blank one and leaves an absent one alone. Both raise a `ValidationException` on
+  `content.title`. A create derives `slug` from the title when none is given, and so
+  does an update that gives the first translation in the current locale.
+- **Invariants stay in the models.** The actions do not judge the values: the single
+  default variant, the closed `role` set, uniqueness of an item within a variant and
+  the soft-delete cascade are enforced by `ProductVariant` and `VariantItem` (see the
+  sections above). A rejected write aborts the action's transaction.
+
+### Filament resource
+
+`app/Filament/Resources/Products/`. `ProductResource` (slug `shop/products`, group
+`shop.navigation.main`) is registered with the admin panel by `ShopPlugin`, whose
+`ModuleFilamentPlugin` trait discovers the module's `Filament/Resources`. The pages
+carry no write logic.
+
+- **Create** (`CreateProduct`) is a 4-step wizard built by `Schemas/ProductWizard`:
+  Product (columns), Content, Variants, Composition. The Content step reuses the
+  fields of the CMS `ContentForm`, read off a schema of their own, so none of the
+  entity and preset selects CMS adds applies: a product's content is always created
+  on the Shop product entity and its default preset. The submit reshapes the wizard
+  state with `ProductForm::createPayload()` and calls `CreateProductAction`.
+- **Edit** (`EditProduct`) is tabbed sections over the same four concerns, laid out
+  by `Schemas/ProductForm::configure()` from the component lists the wizard also
+  uses. The form is filled from the whole aggregate (`ProductForm::stateOf()`: the
+  product columns, the merged content fields and the live variants with their
+  composition), not from the bare record, and the save reshapes the state with
+  `ProductForm::updatePayload()` and calls `UpdateProductAction`. `afterSave()` fills
+  the form again from the stored product, so a variant added in the form keeps its id
+  and the next save updates it instead of creating it twice. A `ValidationException`
+  from the action is shown in a notification and mapped onto the form's field keys.
+  The tenant is not editable.
+- **Variants and composition** are one piece of form state (`variants`) edited by two
+  repeaters: the variants step (hidden `id`, default flag, attributes) and the
+  composition step (the rows of each variant: item, quantity, role). The payload is
+  refused unless exactly one variant is the default, and the item options are the
+  items of the company chosen for the product. The variants can be reordered only
+  while creating, the one time the order is stored.
+- **Table** (`Tables/ProductsTable`) queries `Product`, not `Content`, so the rows
+  are the products themselves: the company global scope (the active company) and the
+  soft deletes apply to them. The title is the one of the merged content, with the
+  company and the content translation eager-loaded.
+  Core's view and edit actions are removed from it, because the edit one opens a modal
+  that fills from the bare columns and saves with `$record->update()`, outside the
+  action and its transaction. Its edit action is a plain URL to the edit page, visible
+  only to who `canEdit`, and runs nothing.
+- **Discontinued items.** A composition may reference a soft-deleted ERP `Item`. The
+  edit form resolves the item `withTrashed()` and labels it «discontinued», so such a
+  product still opens and saves.
+
+### Permissions
+
+`ProductPolicy` (registered in `ShopServiceProvider`) gates the resource pages by the
+CRUD permissions of the products table, `{connection}.shop_products.{operation}`
+(`default.shop_products.select`, `insert`, `update`, `delete`, `restore`,
+`forceDelete`). `permission:refresh` generates them from the models, so the module
+declares none. Opening the resource takes `select` (`canAccess()` requires
+`canViewAny()`); the create page also takes `insert` and the edit page `update`. A
+super admin passes; anybody else needs a grant on the request's guard, and a
+permission that does not exist is not held.
+
+The policy gates the pages by the products table only. `ProductVariant` and
+`VariantItem` are parts of the product (`IsPartOfParent`), and the model layer checks
+the permissions of their own tables (`shop_product_variants`, `shop_variant_items`)
+on every write, once those permissions are registered. A user holding only the
+`shop_products` permissions opens the pages, but a save that touches a variant is
+refused there and rolled back. Failing closed is intended: managing a product takes
+the part permissions as well.
+
+No Shop role grants are seeded, so the surface is super-admin-only until an operator
+grants the permissions.
+
+### Scope
+
+- **Default preset only.** The content is created on the Shop product entity and its
+  default `standard` preset. Storefront categories, per-category presets, facets, the
+  browse snapshot and the `/app` read endpoints are not built yet (plan #3).
+- **Backoffice only.** Filament is the superadmin backoffice. The merchant-facing
+  catalog management experience is left to `laraplate-ui`.
+
+### Known limitation: no aggregate optimistic locking
+
+The product edit does not guard the aggregate against a stale write. `Product` has no
+`lock_version`, the edit page takes no lease on the content and does not use the
+content stale-guard, and the variant sync writes the desired final state. A save from
+a form opened before another admin added a variant therefore removes that variant
+silently. This is a known gap, accepted for the superadmin-only backoffice of this
+version; locking the aggregate is a feature of its own (see `EditProduct`).
+
 ## Not in this module yet
 
 - Stock and availability. They will consume the ERP stock reservation, not
@@ -329,9 +479,11 @@ ERP `Item`s (E7b).
 - Digital fulfilment (download grants for `digital` products).
 - Reviews, order and delivery read models, customer support through SAO.
 - Storefront classification: CMS categories, facets and per-category presets.
-- Any write, API or Filament surface: no Form Requests, API resources, policies
-  or domain actions for the catalog, and no seeded permissions. The module has no
-  HTTP surface yet (see «HTTP surface»).
+- A read or API surface for the catalog: no API resources, `/app` or `/api/v1`
+  endpoints (see «HTTP surface»). The write surface is the one described in «Admin
+  write surface».
+- Merchant-facing catalog management (left to `laraplate-ui`) and optimistic locking
+  of the product aggregate.
 
 ## Developer caveats
 
@@ -344,8 +496,9 @@ ERP `Item`s (E7b).
   sets `Model::preventSilentlyDiscardingAttributes(! isProduction())`
   (`CoreServiceProvider`), so passing a content key in such an array **throws**
   `MassAssignmentException` outside production and is **silently discarded** in
-  production. A future write surface must wire content-key routing in `fill()`
-  first.
+  production. The product write actions do not use mass assignment for content: they
+  filter the payload through `CONTENT_FIELDS` and set each key with `setAttribute()`
+  (see «Admin write surface»).
 - **Entity and preset are not resolved from the content.** For a product
   `Content`, `$content->entity` and `$content->preset` return **null**:
   `$content->presettable` is a CMS `Presettable`, and the CMS `Entity` and
@@ -361,10 +514,12 @@ ERP `Item`s (E7b).
 
 ## HTTP surface
 
-This module has no HTTP surface yet: no routes, controllers, Form Requests or API
-resources. The generic `ShopController` scaffold was removed, `routes/web.php` and
-`routes/api.php` are empty, and `php artisan route:list --name=shop` returns
-nothing. The catalog's read and write surface comes with a later plan.
+The module has no `/app` or `/api/v1` surface: no controllers, Form Requests or API
+resources. `routes/web.php` and `routes/api.php` are empty. The only routes are the
+three pages of the Filament product resource under the admin panel
+(`admin/shop/products`, `/create` and `/{record}/edit`, named
+`filament.admin.resources.shop.products.*`; see «Admin write surface»). The catalog's
+read surface comes with a later plan.
 
 ## Configuration
 
@@ -379,4 +534,6 @@ merge), E4 (content-extension seam), E7b (variant to item pivot), E16 and E17
 (mandatory content, symmetric lifecycle), E20 (Shop-owned product entity), E22
 (attributes are labels), E23 (`company_id` on the product, derived below it), E31
 (`role` value set). The delivery record is
-`docs/superpowers/plans/2026-10-06-shop-catalog-foundation.md`.
+`docs/superpowers/plans/2026-10-06-shop-catalog-foundation.md`. The admin write
+surface is specified in `docs/superpowers/specs/2026-10-20-shop-product-admin-design.md`
+and delivered by `docs/superpowers/plans/2026-10-20-shop-product-admin.md`.
